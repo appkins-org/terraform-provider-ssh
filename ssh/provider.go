@@ -9,14 +9,16 @@ import (
 )
 
 const (
-	DebugLog = "SSH_DEBUG_LOG"
+	DebugLog   = "SSH_DEBUG_LOG"
+	CONNECTION = "connection"
+	DEBUG_LOG  = "debug_log"
 )
 
 // Provider
 func Provider() *schema.Provider {
 	return &schema.Provider{
 		Schema: map[string]*schema.Schema{
-			"connection": {
+			CONNECTION: {
 				Type:     schema.TypeSet,
 				Optional: true,
 				Elem: &schema.Resource{
@@ -30,6 +32,11 @@ func Provider() *schema.Provider {
 							Type:     schema.TypeString,
 							Optional: true,
 							Default:  "22",
+						},
+						"private_key_passphrase": {
+							Type:      schema.TypeString,
+							Optional:  true,
+							Sensitive: true,
 						},
 						"bastion_host": {
 							Type:     schema.TypeString,
@@ -83,7 +90,7 @@ func Provider() *schema.Provider {
 					},
 				},
 			},
-			"debug_log": {
+			DEBUG_LOG: {
 				Type:        schema.TypeString,
 				Optional:    true,
 				Description: "File to write debugging info to",
@@ -101,12 +108,12 @@ func Provider() *schema.Provider {
 
 func providerConfigure(_ context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
 	config := &Config{
-		sshConfig: CreateSshConfig(d.Get("connection").(map[string]interface{})),
+		sshConfig: CreateSshConfig(d.Get(CONNECTION).(map[string]interface{})),
 	}
 
 	var diags diag.Diagnostics
 
-	config.DebugLog = d.Get("debug_log").(string)
+	config.DebugLog = d.Get(DEBUG_LOG).(string)
 
 	if config.DebugLog != "" {
 		debugFile, err := os.OpenFile(config.DebugLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)

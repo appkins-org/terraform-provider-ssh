@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 type SshConfig struct {
@@ -23,12 +25,13 @@ type Config struct {
 }
 
 func CreateSshConfig(m map[string]interface{}) *SshConfig {
-	return &SshConfig{
-		Host:     m["host"].(string),
-		Port:     m["port"].(string),
-		User:     m["user"].(string),
-		Password: m["password"].(string),
-		Key:      m["key"].(string),
+	conf := &SshConfig{
+		Host:          m["host"].(string),
+		Port:          m["port"].(string),
+		User:          m["user"].(string),
+		Password:      m["password"].(string),
+		Key:           m["key"].(string),
+		KeyPassphrase: "",
 		Bastion: &SshConfig{
 			Host:     m["bastion_host"].(string),
 			Port:     m["bastion_port"].(string),
@@ -37,6 +40,18 @@ func CreateSshConfig(m map[string]interface{}) *SshConfig {
 			Key:      m["bastion_key"].(string),
 		},
 	}
+	if pass, err := schema.EnvDefaultFunc("SSH_PRIVATE_KEY_PASSPHRASE", "")(); err == nil {
+		conf.KeyPassphrase = pass.(string)
+	} else if pass, ok := m["key_passphrase"].(string); ok {
+		conf.KeyPassphrase = pass
+	}
+
+	if pass, err := schema.EnvDefaultFunc("SSH_BASTION_PRIVATE_KEY_PASSPHRASE", "")(); err == nil {
+		conf.Bastion.KeyPassphrase = pass.(string)
+	} else if pass, ok := m["key_passphrase"].(string); ok {
+		conf.Bastion.KeyPassphrase = pass
+	}
+	return conf
 }
 
 func GetOrDefault[V comparable](m map[string]interface{}, k string, d V) V {
@@ -66,10 +81,6 @@ func MergeSshConfigs(a *SshConfig, b *SshConfig) (m *SshConfig) {
 	jb, _ := json.Marshal(b)
 	json.Unmarshal(jb, &m)
 	return
-}
-
-func (c *Config) GetEasySshConfig(v *SshConfig) {
-
 }
 
 func (c *Config) Debug(format string, args ...interface{}) (int, error) {

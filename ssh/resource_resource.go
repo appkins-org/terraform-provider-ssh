@@ -12,13 +12,12 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/loafoe/easyssh-proxy/v2"
 )
 
 type SshResourceManager struct {
-	config       *Config
-	connSettings *SshConfig
+	config  *Config
+	connect *SshConfig
 }
 
 func resourceResource() *schema.Resource {
@@ -46,13 +45,6 @@ func customDiff(_ context.Context, d *schema.ResourceDiff, _ interface{}) error 
 
 func sshResourceSchema(sensitive bool) map[string]*schema.Schema {
 	return map[string]*schema.Schema{
-		"when": {
-			Description:  "Determines when the commands is to be executed. Options are 'create' or 'destroy'",
-			Type:         schema.TypeString,
-			Optional:     true,
-			Default:      "create",
-			ValidateFunc: validation.StringInSlice([]string{"create", "destroy"}, false),
-		},
 		"triggers": {
 			Description: "A map of arbitrary strings that, when changed, will force the 'hsdp_container_host_exec' resource to be replaced, re-running any associated commands.",
 			Type:        schema.TypeMap,
@@ -255,32 +247,11 @@ func sshResourceSchema(sensitive bool) map[string]*schema.Schema {
 func resourceResourceDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	when := d.Get("when").(string)
-
-	if when == "destroy" {
-		diags, _ = mainRun(ctx, d, m, false)
-	}
+	diags, _ = mainRun(ctx, d, m, "destroy")
 	if !hasErrors(diags) {
 		d.SetId("")
 	}
 	return diags
-}
-
-func getDeleteCommands(d *schema.ResourceData) []string {
-	var commands []string
-	destroy := d.Get("destroy").(map[string]interface{})
-	preCommands := destroy["pre_commands"].([]interface{})
-	commands = append(commands, toStringSlice(preCommands)...)
-	commands = append(commands, toStringSlice(destroy["commands"].([]interface{}))...)
-	return commands
-}
-
-func toStringSlice(preCommands []interface{}) []string {
-	var commands []string
-	for _, v := range preCommands {
-		commands = append(commands, v.(string))
-	}
-	return commands
 }
 
 func hasErrors(diags diag.Diagnostics) bool {
@@ -292,15 +263,18 @@ func hasErrors(diags diag.Diagnostics) bool {
 	return false
 }
 
-func (mgr *SshResourceManager) validateResource(d *schema.ResourceData) diag.Diagnostics {
+func (m *SshResourceManager) validateResource(d *schema.ResourceData) diag.Diagnostics {
 	var diags diag.Diagnostics
 	var commands []string
+
+	if m.connect == nil {
+		m.connect = m.config.CreateSsh(d.Get("connect").(map[string]interface{}))
+	}
 
 	timeout := d.Get("timeout").(string)
 	user := d.Get("user").(string)
 	agent := d.Get("agent").(bool)
 	retryDelay := d.Get("retry_delay").(string)
-	connect := CreateSshConfig(d.Get("connect").(map[string]interface{}))
 
 	timeoutValue, err := time.ParseDuration(timeout)
 	if err != nil {
@@ -317,7 +291,7 @@ func (mgr *SshResourceManager) validateResource(d *schema.ResourceData) diag.Dia
 	if len(diags) > 0 {
 		return diags
 	}
-	commands, diags = collectCommands(d, "commands")
+	commands, diags = collectLifecycle(d, "create", "commands")
 	if len(diags) > 0 {
 		return diags
 	}
@@ -325,27 +299,27 @@ func (mgr *SshResourceManager) validateResource(d *schema.ResourceData) diag.Dia
 		if user == "" {
 			return diag.FromErr(fmt.Errorf("user must be set when 'commands' is specified"))
 		}
-		if !agent && connect.Key == "" && connect.Password == "" {
-			return diag.FromErr(fmt.Errorf("'mgr.connSettings.Key' must be set when 'commands' is specified and 'agent' is false and no 'mgr.connSettings.Password' is given"))
+		if !agent && m.connect.Key == "" && m.connect.Password == "" {
+			return diag.FromErr(fmt.Errorf("'mgr.connect.Key' must be set when 'commands' is specified and 'agent' is false and no 'mgr.connect.Password' is given"))
 		}
 	}
-	if agent && (connect.Key != "" || connect.Password != "") {
-		return diag.FromErr(fmt.Errorf("agent mode is enabled, not expecting a mgr.connSettings.Password or private key"))
+	if agent && (m.connect.Key != "" || m.connect.Password != "") {
+		return diag.FromErr(fmt.Errorf("agent mode is enabled, not expecting a mgr.connect.Password or private key"))
 	}
 	return diags
 }
 
-func mainRun(_ context.Context, d *schema.ResourceData, m interface{}, onUpdate bool) (diag.Diagnostics, *SshResourceManager) {
+func mainRun(_ context.Context, d *schema.ResourceData, m interface{}, stage string) (diag.Diagnostics, *SshResourceManager) {
 	mgr := &SshResourceManager{
 		config: m.(*Config),
 	}
 
 	if md, ok := d.GetOk("connect"); ok {
 		if mdd, ok := md.(map[string]interface{}); ok {
-			mgr.connSettings = mgr.config.CreateSsh(mdd)
+			mgr.connect = mgr.config.CreateSsh(mdd)
 		}
 	} else {
-		mgr.connSettings = mgr.config.sshConfig
+		mgr.connect = mgr.config.sshConfig
 	}
 
 	if diags := mgr.validateResource(d); len(diags) > 0 {
@@ -358,13 +332,11 @@ func mainRun(_ context.Context, d *schema.ResourceData, m interface{}, onUpdate 
 	timeout := d.Get("timeout").(string)
 	retryDelay := d.Get("retry_delay").(string)
 
-	commandsAfterFileChanges := d.Get("commands_after_file_changes").(bool)
-
 	timeoutValue, _ := time.ParseDuration(timeout)
 	retryDelayValue, _ := time.ParseDuration(retryDelay)
 
 	// Pre commands
-	preCommands, diags := collectCommands(d, "pre_commands")
+	preCommands, diags := collectLifecycle(d, stage, "pre_commands")
 	if len(diags) > 0 {
 		return diags, mgr
 	}
@@ -374,43 +346,45 @@ func mainRun(_ context.Context, d *schema.ResourceData, m interface{}, onUpdate 
 		return diags, mgr
 	}
 	// And commands
-	commands, diags := collectCommands(d, "commands")
+	commands, diags := collectLifecycle(d, stage, "commands")
 	if len(diags) > 0 {
 		return diags, mgr
 	}
 
 	// Collect SSH details
 	ssh := &easyssh.MakeConfig{
-		User:       mgr.connSettings.User,
-		Server:     mgr.connSettings.Host,
-		Port:       mgr.connSettings.Port,
-		Key:        mgr.connSettings.Key,
+		User:       mgr.connect.User,
+		Server:     mgr.connect.Host,
+		Port:       mgr.connect.Port,
+		Key:        mgr.connect.Key,
 		Passphrase: privateKeyPassphrase.(string),
 		Proxy:      http.ProxyFromEnvironment,
 		Bastion: easyssh.DefaultConfig{
-			User:       mgr.connSettings.Bastion.User,
-			Server:     mgr.connSettings.Bastion.Host,
+			User:       mgr.connect.Bastion.User,
+			Server:     mgr.connect.Bastion.Host,
 			Passphrase: bastionPrivateKeyPassphrase.(string),
-			Port:       mgr.connSettings.Bastion.Port,
+			Port:       mgr.connect.Bastion.Port,
 		},
 	}
-	if mgr.connSettings.Password != "" {
-		ssh.Password = mgr.connSettings.Password
+	if mgr.connect.Password != "" {
+		ssh.Password = mgr.connect.Password
 	}
-	if mgr.connSettings.Bastion.Password != "" {
-		ssh.Bastion.Password = mgr.connSettings.Bastion.Password
+	if mgr.connect.Bastion.Password != "" {
+		ssh.Bastion.Password = mgr.connect.Bastion.Password
 	}
-	if mgr.connSettings.Bastion.User != "" {
-		ssh.Bastion.User = mgr.connSettings.Bastion.User
+	if mgr.connect.Bastion.User != "" {
+		ssh.Bastion.User = mgr.connect.Bastion.User
 	}
-	if mgr.connSettings.Key != "" {
-		ssh.Bastion.Key = mgr.connSettings.Key
+	if mgr.connect.Key != "" {
+		ssh.Bastion.Key = mgr.connect.Key
 	}
-	if mgr.connSettings.Bastion.Key != "" {
-		ssh.Bastion.Key = mgr.connSettings.Bastion.Key
+	if mgr.connect.Bastion.Key != "" {
+		ssh.Bastion.Key = mgr.connect.Bastion.Key
 	}
 
-	if onUpdate && !(d.HasChange("file") || d.HasChange("commands")) {
+	onUpdate := stage == "update"
+
+	if onUpdate && !(d.HasChange("file") || d.HasChange(stage)) {
 		return diags, mgr
 	}
 
@@ -429,7 +403,7 @@ func mainRun(_ context.Context, d *schema.ResourceData, m interface{}, onUpdate 
 		return diag.FromErr(fmt.Errorf("copying files to remote: %w", ctx.Err())), mgr
 	}
 
-	if onUpdate && !commandsAfterFileChanges {
+	if onUpdate && len(commands) == 0 {
 		return diags, mgr
 	}
 
@@ -439,23 +413,22 @@ func mainRun(_ context.Context, d *schema.ResourceData, m interface{}, onUpdate 
 		return errDiags, mgr
 	}
 
-	_ = d.Set("result", stdout)
+	if stage == "read" {
+		_ = d.Set("result", stdout)
+	}
 
 	return diags, mgr
 }
 
 func resourceResourceUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
-	when := d.Get("when").(string)
-
-	if when == "create" {
-		diags, _ = mainRun(ctx, d, m, true)
-	}
+	diags, _ = mainRun(ctx, d, m, "update")
 	return diags
 }
 
-func resourceResourceRead(_ context.Context, _ *schema.ResourceData, _ interface{}) diag.Diagnostics {
+func resourceResourceRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
+	diags, _ = mainRun(ctx, d, m, "read")
 
 	return diags
 }
@@ -463,9 +436,7 @@ func resourceResourceRead(_ context.Context, _ *schema.ResourceData, _ interface
 func resourceResourceCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	// when := d.Get("when").(string)
-
-	diags, _ = mainRun(ctx, d, m, false)
+	diags, _ = mainRun(ctx, d, m, "create")
 
 	if !hasErrors(diags) {
 		d.SetId(fmt.Sprintf("%d", rand.Int()))
@@ -585,6 +556,24 @@ func copyFiles(ctx context.Context, retryDelay time.Duration, ssh *easyssh.MakeC
 	return nil
 }
 
+func collectLifecycle(d *schema.ResourceData, field string, stage string) ([]string, diag.Diagnostics) {
+	life := d.Get(field).(map[string]interface{})
+	if stage != "pre_commands" && stage != "commands" {
+		return nil, diag.Errorf("Invalid stage: %s", stage)
+	}
+	return collectLifecycleCommands(life, stage)
+}
+
+func collectLifecycleCommands(d map[string]interface{}, field string) ([]string, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	list := d[field].([]interface{})
+	commands := make([]string, 0)
+	for i := 0; i < len(list); i++ {
+		commands = append(commands, list[i].(string))
+	}
+	return commands, diags
+}
+
 func collectCommands(d *schema.ResourceData, field string) ([]string, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	list := d.Get(field).([]interface{})
@@ -603,15 +592,6 @@ type provisionFile struct {
 	Permissions string
 	Owner       string
 	Group       string
-}
-
-func getSshCredentials(d *schema.ResourceData) (cfg *SshConfig) {
-	if v, ok := d.GetOk("ssh"); ok {
-		if vL, ok := v.(map[string]interface{}); ok {
-			cfg = CreateSshConfig(vL)
-		}
-	}
-	return
 }
 
 func collectFilesToCreate(d *schema.ResourceData) ([]provisionFile, diag.Diagnostics) {
