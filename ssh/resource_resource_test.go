@@ -40,31 +40,37 @@ func testAccResourceResource(random string) string {
 	return fmt.Sprintf(`
 
 resource "ssh_resource" "test" {
-	host        = "%s"
-    user        = "%s"
-    agent       = false
+	connect {
+    host       = "%s"
+    user       = "%s"
+    agent      = false
     private_key = "%s"
+  }
 
 	timeout = "5m"
 
 	retry_delay = "2s"
 
+  create {
     commands = [
-       "date > /tmp/terraform-provider-ssh-test-%s"
+      "rm /tmp/terraform-provider-ssh-test-%s"
     ]
+  }
 }
 
 resource "ssh_resource" "destroy" {
-	host        = "%s"
-    user        = "%s"
-    agent       = false
+  connect {
+    host       = "%s"
+    user       = "%s"
+    agent      = false
     private_key = "%s"
- 
-    when        = "destroy"
+  }
 
+  destroy {
     commands = [
-        "rm /tmp/terraform-provider-ssh-test-%s"
+      "rm /tmp/terraform-provider-ssh-test-%s"
     ]
+  }
 }
 `,
 		// SSH Resource test

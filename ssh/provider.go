@@ -16,6 +16,73 @@ const (
 func Provider() *schema.Provider {
 	return &schema.Provider{
 		Schema: map[string]*schema.Schema{
+			"connection": {
+				Type:     schema.TypeSet,
+				Optional: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"host": {
+							Type:     schema.TypeString,
+							Required: true,
+							ForceNew: true,
+						},
+						"port": {
+							Type:     schema.TypeString,
+							Optional: true,
+							Default:  "22",
+						},
+						"bastion_host": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						"bastion_port": {
+							Type:     schema.TypeString,
+							Optional: true,
+							Default:  "22",
+						},
+						"user": {
+							Type:     schema.TypeString,
+							Optional: true,
+							ForceNew: true,
+						},
+						"bastion_user": {
+							Type:     schema.TypeString,
+							Optional: true,
+							ForceNew: true,
+						},
+						"password": {
+							Type:      schema.TypeString,
+							Optional:  true,
+							Sensitive: true,
+						},
+						"bastion_password": {
+							Type:      schema.TypeString,
+							Optional:  true,
+							Sensitive: true,
+						},
+						"private_key": {
+							Type:      schema.TypeString,
+							Optional:  true,
+							Sensitive: true,
+						},
+						"key_pass_phrase": {
+							Type:      schema.TypeString,
+							Optional:  true,
+							Sensitive: true,
+						},
+						"bastion_private_key": {
+							Type:      schema.TypeString,
+							Optional:  true,
+							Sensitive: true,
+						},
+						"agent": {
+							Type:     schema.TypeBool,
+							Optional: true,
+							Default:  false,
+						},
+					},
+				},
+			},
 			"debug_log": {
 				Type:        schema.TypeString,
 				Optional:    true,
@@ -33,7 +100,9 @@ func Provider() *schema.Provider {
 }
 
 func providerConfigure(_ context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
-	config := &Config{}
+	config := &Config{
+		sshConfig: CreateSshConfig(d.Get("connection").(map[string]interface{})),
+	}
 
 	var diags diag.Diagnostics
 

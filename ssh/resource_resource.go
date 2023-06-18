@@ -16,6 +16,11 @@ import (
 	"github.com/loafoe/easyssh-proxy/v2"
 )
 
+type SshResourceManager struct {
+	config       *Config
+	connSettings *SshConfig
+}
+
 func resourceResource() *schema.Resource {
 	return &schema.Resource{
 		SchemaVersion: 4,
@@ -27,29 +32,8 @@ func resourceResource() *schema.Resource {
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
 		},
-		StateUpgraders: []schema.StateUpgrader{
-			{
-				Type:    resourceResourceV0().CoreConfigSchema().ImpliedType(),
-				Upgrade: patchResourceV0,
-				Version: 0,
-			},
-			{
-				Type:    resourceResourceV1().CoreConfigSchema().ImpliedType(),
-				Upgrade: patchResourceV1,
-				Version: 1,
-			},
-			{
-				Type:    resourceResourceV2().CoreConfigSchema().ImpliedType(),
-				Upgrade: patchResourceV2,
-				Version: 2,
-			},
-			{
-				Type:    resourceResourceV3().CoreConfigSchema().ImpliedType(),
-				Upgrade: patchResourceV3,
-				Version: 3,
-			},
-		},
-		Schema: sshResourceSchema(false),
+		StateUpgraders: []schema.StateUpgrader{},
+		Schema:         sshResourceSchema(false),
 	}
 }
 
@@ -75,89 +59,6 @@ func sshResourceSchema(sensitive bool) map[string]*schema.Schema {
 			Optional:    true,
 			ForceNew:    true,
 		},
-		"host": {
-			Type:     schema.TypeString,
-			Required: true,
-			ForceNew: true,
-		},
-		"port": {
-			Type:     schema.TypeString,
-			Optional: true,
-			Default:  "22",
-		},
-		"bastion_host": {
-			Type:     schema.TypeString,
-			Optional: true,
-		},
-		"bastion_port": {
-			Type:     schema.TypeString,
-			Optional: true,
-			Default:  "22",
-		},
-		"user": {
-			Type:     schema.TypeString,
-			Optional: true,
-			ForceNew: true,
-		},
-		"host_user": {
-			Type:       schema.TypeString,
-			Optional:   true,
-			ForceNew:   true,
-			Deprecated: "Use 'user' and 'bastion_user'",
-		},
-		"bastion_user": {
-			Type:     schema.TypeString,
-			Optional: true,
-			ForceNew: true,
-		},
-		"password": {
-			Type:      schema.TypeString,
-			Optional:  true,
-			Sensitive: true,
-		},
-		"bastion_password": {
-			Type:      schema.TypeString,
-			Optional:  true,
-			Sensitive: true,
-		},
-		"private_key": {
-			Type:      schema.TypeString,
-			Optional:  true,
-			Sensitive: true,
-		},
-		"host_private_key": {
-			Type:       schema.TypeString,
-			Optional:   true,
-			Sensitive:  true,
-			Deprecated: "Use 'private_key' and 'bastion_private_key'",
-		},
-		"bastion_private_key": {
-			Type:      schema.TypeString,
-			Optional:  true,
-			Sensitive: true,
-		},
-		"agent": {
-			Type:     schema.TypeBool,
-			Optional: true,
-			Default:  false,
-		},
-		"pre_commands": {
-			Type:     schema.TypeList,
-			MaxItems: 100,
-			Optional: true,
-			Elem:     &schema.Schema{Type: schema.TypeString},
-		},
-		"commands": {
-			Type:     schema.TypeList,
-			MaxItems: 100,
-			Optional: true,
-			Elem:     &schema.Schema{Type: schema.TypeString},
-		},
-		"commands_after_file_changes": {
-			Type:     schema.TypeBool,
-			Optional: true,
-			Default:  true,
-		},
 		"timeout": {
 			Type:     schema.TypeString,
 			Optional: true,
@@ -168,10 +69,147 @@ func sshResourceSchema(sensitive bool) map[string]*schema.Schema {
 			Optional: true,
 			Default:  "10s",
 		},
-		"result": {
-			Type:      schema.TypeString,
-			Computed:  true,
-			Sensitive: sensitive,
+		"connect": {
+			Type:     schema.TypeSet,
+			Optional: true,
+			Elem: &schema.Resource{
+				Schema: map[string]*schema.Schema{
+					"host": {
+						Type:     schema.TypeString,
+						Required: true,
+						ForceNew: true,
+					},
+					"port": {
+						Type:     schema.TypeString,
+						Optional: true,
+						Default:  "22",
+					},
+					"bastion_host": {
+						Type:     schema.TypeString,
+						Optional: true,
+					},
+					"bastion_port": {
+						Type:     schema.TypeString,
+						Optional: true,
+						Default:  "22",
+					},
+					"user": {
+						Type:     schema.TypeString,
+						Optional: true,
+						ForceNew: true,
+					},
+					"bastion_user": {
+						Type:     schema.TypeString,
+						Optional: true,
+						ForceNew: true,
+					},
+					"password": {
+						Type:      schema.TypeString,
+						Optional:  true,
+						Sensitive: true,
+					},
+					"bastion_password": {
+						Type:      schema.TypeString,
+						Optional:  true,
+						Sensitive: true,
+					},
+					"private_key": {
+						Type:      schema.TypeString,
+						Optional:  true,
+						Sensitive: true,
+					},
+					"bastion_private_key": {
+						Type:      schema.TypeString,
+						Optional:  true,
+						Sensitive: true,
+					},
+					"agent": {
+						Type:     schema.TypeBool,
+						Optional: true,
+						Default:  false,
+					},
+				},
+			},
+		},
+		"create": {
+			Type:     schema.TypeSet,
+			Optional: true,
+			Elem: &schema.Resource{
+				Schema: map[string]*schema.Schema{
+					"pre_commands": {
+						Type:     schema.TypeList,
+						MaxItems: 100,
+						Optional: true,
+						Elem:     &schema.Schema{Type: schema.TypeString},
+					},
+					"commands": {
+						Type:     schema.TypeList,
+						MaxItems: 100,
+						Optional: true,
+						Elem:     &schema.Schema{Type: schema.TypeString},
+					},
+				},
+			},
+		},
+		"update": {
+			Type:     schema.TypeSet,
+			Optional: true,
+			Elem: &schema.Resource{
+				Schema: map[string]*schema.Schema{
+					"pre_commands": {
+						Type:     schema.TypeList,
+						MaxItems: 100,
+						Optional: true,
+						Elem:     &schema.Schema{Type: schema.TypeString},
+					},
+					"commands": {
+						Type:     schema.TypeList,
+						MaxItems: 100,
+						Optional: true,
+						Elem:     &schema.Schema{Type: schema.TypeString},
+					},
+				},
+			},
+		},
+		"destroy": {
+			Type:     schema.TypeSet,
+			Optional: true,
+			Elem: &schema.Resource{
+				Schema: map[string]*schema.Schema{
+					"pre_commands": {
+						Type:     schema.TypeList,
+						MaxItems: 100,
+						Optional: true,
+						Elem:     &schema.Schema{Type: schema.TypeString},
+					},
+					"commands": {
+						Type:     schema.TypeList,
+						MaxItems: 100,
+						Optional: true,
+						Elem:     &schema.Schema{Type: schema.TypeString},
+					},
+				},
+			},
+		},
+		"read": {
+			Type:     schema.TypeSet,
+			Optional: true,
+			Elem: &schema.Resource{
+				Schema: map[string]*schema.Schema{
+					"scripts": {
+						Type:     schema.TypeList,
+						MaxItems: 100,
+						Optional: true,
+						Elem:     &schema.Schema{Type: schema.TypeString},
+					},
+					"commands": {
+						Type:     schema.TypeList,
+						MaxItems: 100,
+						Optional: true,
+						Elem:     &schema.Schema{Type: schema.TypeString},
+					},
+				},
+			},
 		},
 		"file": {
 			Type:     schema.TypeSet,
@@ -206,6 +244,11 @@ func sshResourceSchema(sensitive bool) map[string]*schema.Schema {
 				},
 			},
 		},
+		"result": {
+			Type:      schema.TypeString,
+			Computed:  true,
+			Sensitive: sensitive,
+		},
 	}
 }
 
@@ -215,12 +258,29 @@ func resourceResourceDelete(ctx context.Context, d *schema.ResourceData, m inter
 	when := d.Get("when").(string)
 
 	if when == "destroy" {
-		diags = mainRun(ctx, d, m, false)
+		diags, _ = mainRun(ctx, d, m, false)
 	}
 	if !hasErrors(diags) {
 		d.SetId("")
 	}
 	return diags
+}
+
+func getDeleteCommands(d *schema.ResourceData) []string {
+	var commands []string
+	destroy := d.Get("destroy").(map[string]interface{})
+	preCommands := destroy["pre_commands"].([]interface{})
+	commands = append(commands, toStringSlice(preCommands)...)
+	commands = append(commands, toStringSlice(destroy["commands"].([]interface{}))...)
+	return commands
+}
+
+func toStringSlice(preCommands []interface{}) []string {
+	var commands []string
+	for _, v := range preCommands {
+		commands = append(commands, v.(string))
+	}
+	return commands
 }
 
 func hasErrors(diags diag.Diagnostics) bool {
@@ -232,17 +292,15 @@ func hasErrors(diags diag.Diagnostics) bool {
 	return false
 }
 
-func validateResource(d *schema.ResourceData) diag.Diagnostics {
+func (mgr *SshResourceManager) validateResource(d *schema.ResourceData) diag.Diagnostics {
 	var diags diag.Diagnostics
 	var commands []string
 
 	timeout := d.Get("timeout").(string)
 	user := d.Get("user").(string)
 	agent := d.Get("agent").(bool)
-	privateKey := d.Get("private_key").(string)
-	hostPrivateKey := d.Get("host_private_key").(string)
 	retryDelay := d.Get("retry_delay").(string)
-	password := d.Get("password").(string)
+	connect := CreateSshConfig(d.Get("connect").(map[string]interface{}))
 
 	timeoutValue, err := time.ParseDuration(timeout)
 	if err != nil {
@@ -254,10 +312,6 @@ func validateResource(d *schema.ResourceData) diag.Diagnostics {
 	}
 	if retryDelayValue >= timeoutValue {
 		return diag.FromErr(fmt.Errorf("retry_delay cannot be greater than timeout (%d >= %d)", retryDelayValue, timeoutValue))
-	}
-
-	if len(hostPrivateKey) == 0 {
-		hostPrivateKey = privateKey
 	}
 	_, diags = collectFilesToCreate(d)
 	if len(diags) > 0 {
@@ -271,103 +325,93 @@ func validateResource(d *schema.ResourceData) diag.Diagnostics {
 		if user == "" {
 			return diag.FromErr(fmt.Errorf("user must be set when 'commands' is specified"))
 		}
-		if !agent && privateKey == "" && password == "" {
-			return diag.FromErr(fmt.Errorf("'privateKey' must be set when 'commands' is specified and 'agent' is false and no 'password' is given"))
+		if !agent && connect.Key == "" && connect.Password == "" {
+			return diag.FromErr(fmt.Errorf("'mgr.connSettings.Key' must be set when 'commands' is specified and 'agent' is false and no 'mgr.connSettings.Password' is given"))
 		}
 	}
-	if agent && (hostPrivateKey != "" || privateKey != "" || password != "") {
-		return diag.FromErr(fmt.Errorf("agent mode is enabled, not expecting a password or private key"))
+	if agent && (connect.Key != "" || connect.Password != "") {
+		return diag.FromErr(fmt.Errorf("agent mode is enabled, not expecting a mgr.connSettings.Password or private key"))
 	}
 	return diags
 }
 
-func mainRun(_ context.Context, d *schema.ResourceData, m interface{}, onUpdate bool) diag.Diagnostics {
-	config := m.(*Config)
-
-	if diags := validateResource(d); len(diags) > 0 {
-		return diags
+func mainRun(_ context.Context, d *schema.ResourceData, m interface{}, onUpdate bool) (diag.Diagnostics, *SshResourceManager) {
+	mgr := &SshResourceManager{
+		config: m.(*Config),
 	}
 
-	bastionHost := d.Get("bastion_host").(string)
-	user := d.Get("user").(string)
-	hostUser := d.Get("host_user").(string)
-	bastionUser := d.Get("bastion_user").(string)
-	password := d.Get("password").(string)
-	bastionPassword := d.Get("bastion_password").(string)
-	privateKey := d.Get("private_key").(string)
+	if md, ok := d.GetOk("connect"); ok {
+		if mdd, ok := md.(map[string]interface{}); ok {
+			mgr.connSettings = mgr.config.CreateSsh(mdd)
+		}
+	} else {
+		mgr.connSettings = mgr.config.sshConfig
+	}
+
+	if diags := mgr.validateResource(d); len(diags) > 0 {
+		return diags, mgr
+	}
+
 	privateKeyPassphrase, _ := schema.EnvDefaultFunc("SSH_PRIVATE_KEY_PASSPHRASE", "")()
-	hostPrivateKey := d.Get("host_private_key").(string)
-	bastionPrivateKey := d.Get("bastion_private_key").(string)
 	bastionPrivateKeyPassphrase, _ := schema.EnvDefaultFunc("SSH_BASTION_PRIVATE_KEY_PASSPHRASE", "")()
-	host := d.Get("host").(string)
+
 	timeout := d.Get("timeout").(string)
 	retryDelay := d.Get("retry_delay").(string)
-	port := d.Get("port").(string)
-	bastionPort := d.Get("bastion_port").(string)
+
 	commandsAfterFileChanges := d.Get("commands_after_file_changes").(bool)
 
 	timeoutValue, _ := time.ParseDuration(timeout)
 	retryDelayValue, _ := time.ParseDuration(retryDelay)
 
-	if len(hostUser) == 0 {
-		hostUser = user
-	}
-	if len(hostPrivateKey) == 0 {
-		hostPrivateKey = privateKey
-	}
 	// Pre commands
 	preCommands, diags := collectCommands(d, "pre_commands")
 	if len(diags) > 0 {
-		return diags
+		return diags, mgr
 	}
 	// Fetch files first before starting provisioning
 	createFiles, diags := collectFilesToCreate(d)
 	if len(diags) > 0 {
-		return diags
+		return diags, mgr
 	}
 	// And commands
 	commands, diags := collectCommands(d, "commands")
 	if len(diags) > 0 {
-		return diags
+		return diags, mgr
 	}
 
 	// Collect SSH details
-	privateIP := host
 	ssh := &easyssh.MakeConfig{
-		User:       hostUser,
-		Server:     privateIP,
-		Port:       port,
-		Key:        privateKey,
+		User:       mgr.connSettings.User,
+		Server:     mgr.connSettings.Host,
+		Port:       mgr.connSettings.Port,
+		Key:        mgr.connSettings.Key,
 		Passphrase: privateKeyPassphrase.(string),
 		Proxy:      http.ProxyFromEnvironment,
 		Bastion: easyssh.DefaultConfig{
-			User:       user,
-			Server:     bastionHost,
+			User:       mgr.connSettings.Bastion.User,
+			Server:     mgr.connSettings.Bastion.Host,
 			Passphrase: bastionPrivateKeyPassphrase.(string),
-			Port:       bastionPort,
+			Port:       mgr.connSettings.Bastion.Port,
 		},
 	}
-	if password != "" {
-		ssh.Password = password
+	if mgr.connSettings.Password != "" {
+		ssh.Password = mgr.connSettings.Password
 	}
-	if bastionPassword != "" {
-		ssh.Bastion.Password = bastionPassword
+	if mgr.connSettings.Bastion.Password != "" {
+		ssh.Bastion.Password = mgr.connSettings.Bastion.Password
 	}
-	if bastionUser != "" {
-		ssh.Bastion.User = bastionUser
+	if mgr.connSettings.Bastion.User != "" {
+		ssh.Bastion.User = mgr.connSettings.Bastion.User
 	}
-	if hostPrivateKey != "" {
-		ssh.Key = hostPrivateKey
+	if mgr.connSettings.Key != "" {
+		ssh.Bastion.Key = mgr.connSettings.Key
 	}
-	if privateKey != "" {
-		ssh.Bastion.Key = privateKey
-	}
-	if bastionPrivateKey != "" {
-		ssh.Bastion.Key = bastionPrivateKey
+	if mgr.connSettings.Bastion.Key != "" {
+		ssh.Bastion.Key = mgr.connSettings.Bastion.Key
 	}
 
 	if onUpdate && !(d.HasChange("file") || d.HasChange("commands")) {
-		return diags
+		return diags, mgr
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeoutValue)
@@ -377,27 +421,27 @@ func mainRun(_ context.Context, d *schema.ResourceData, m interface{}, onUpdate 
 	if len(preCommands) > 0 {
 		_, errDiags, err := runCommands(ctx, retryDelayValue, preCommands, timeoutValue, ssh, m)
 		if err != nil {
-			return errDiags
+			return errDiags, mgr
 		}
 	}
 	// Provision files
-	if err := copyFiles(ctx, retryDelayValue, ssh, config, createFiles); err != nil {
-		return diag.FromErr(fmt.Errorf("copying files to remote: %w", ctx.Err()))
+	if err := copyFiles(ctx, retryDelayValue, ssh, mgr.config, createFiles); err != nil {
+		return diag.FromErr(fmt.Errorf("copying files to remote: %w", ctx.Err())), mgr
 	}
 
 	if onUpdate && !commandsAfterFileChanges {
-		return diags
+		return diags, mgr
 	}
 
 	// Run commands
 	stdout, errDiags, err := runCommands(ctx, retryDelayValue, commands, timeoutValue, ssh, m)
 	if err != nil {
-		return errDiags
+		return errDiags, mgr
 	}
 
 	_ = d.Set("result", stdout)
 
-	return diags
+	return diags, mgr
 }
 
 func resourceResourceUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
@@ -405,7 +449,7 @@ func resourceResourceUpdate(ctx context.Context, d *schema.ResourceData, m inter
 	when := d.Get("when").(string)
 
 	if when == "create" {
-		diags = mainRun(ctx, d, m, true)
+		diags, _ = mainRun(ctx, d, m, true)
 	}
 	return diags
 }
@@ -419,13 +463,9 @@ func resourceResourceRead(_ context.Context, _ *schema.ResourceData, _ interface
 func resourceResourceCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	when := d.Get("when").(string)
+	// when := d.Get("when").(string)
 
-	if when == "create" {
-		diags = mainRun(ctx, d, m, false)
-	} else {
-		diags = validateResource(d)
-	}
+	diags, _ = mainRun(ctx, d, m, false)
 
 	if !hasErrors(diags) {
 		d.SetId(fmt.Sprintf("%d", rand.Int()))
@@ -563,6 +603,15 @@ type provisionFile struct {
 	Permissions string
 	Owner       string
 	Group       string
+}
+
+func getSshCredentials(d *schema.ResourceData) (cfg *SshConfig) {
+	if v, ok := d.GetOk("ssh"); ok {
+		if vL, ok := v.(map[string]interface{}); ok {
+			cfg = CreateSshConfig(vL)
+		}
+	}
+	return
 }
 
 func collectFilesToCreate(d *schema.ResourceData) ([]provisionFile, diag.Diagnostics) {
